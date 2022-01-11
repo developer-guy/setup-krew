@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/url"
@@ -54,6 +57,11 @@ func main() {
 		log.Fatalf("could not install %s from URL %s: %v", sha256fileName, sha256FileDownloadURL, err)
 	}
 
+	err = checkWhetherSha256OfFilesAreOk(filepath.Join(td, fileName), filepath.Join(td, sha256fileName))
+	if err != nil {
+		log.Fatalf("could not match digests between files %s and %s: %v", fileName, sha256fileName, err)
+	}
+
 	home := os.Getenv("HOME")
 	installationPath := fmt.Sprintf("%s/%s/%s", home, ".setup-krew", "bin")
 	_, err = exec.Command("mkdir", "-p", installationPath).CombinedOutput()
@@ -71,6 +79,31 @@ func main() {
 	if err != nil {
 		log.Fatalf("could not add binary to \"GITHUB_PATH\": %v", err)
 	}
+}
+
+func checkWhetherSha256OfFilesAreOk(f1, f2 string) error {
+	b, err := os.Open(f1)
+	if err != nil {
+		return err
+	}
+	defer b.Close()
+
+	hash := sha256.New()
+	if _, err := io.Copy(hash, b); err != nil {
+		return err
+	}
+
+	b2, err := ioutil.ReadFile(f2)
+	if err != nil {
+		return err
+	}
+
+	sha256Str := hex.EncodeToString(hash.Sum(nil))
+	if strings.EqualFold(sha256Str, string(b2)) {
+		return fmt.Errorf("%s might has been compromised. Expected SHA256: %s, but found: %s", f1, string(b2), sha256Str)
+	}
+
+	return nil
 }
 
 func installAndExtractTheTarGZFiles(dst string, downloadURL string, fileName string, verbose bool) error {
