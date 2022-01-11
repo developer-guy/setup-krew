@@ -1,7 +1,7 @@
 name: setup-krew
 description: "A GitHub Action to install kubernetes-sigs/krew tool"
 inputs:
-  version:
+  krew-version:
     description: "a version of the krew"
     required: false
     default: "latest"
@@ -10,4 +10,4 @@ runs:
   steps:
     - name: "setup-krew"
       shell: sh
-      run: go run main.go -version ${{ inputs.version }}
+      run: go run main.go -version ${{ inputs.krew-version }}
