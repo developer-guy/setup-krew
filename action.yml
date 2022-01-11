@@ -10,4 +10,4 @@ runs:
   steps:
     - name: "setup-krew"
       shell: sh
-      run: go run main.go ${{ inputs.version }}
+      run: go run main.go -version ${{ inputs.version }}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -10,57 +11,51 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"github.com/google/go-github/v41/github"
 	"github.com/hashicorp/go-getter"
-	"github.com/sethvargo/go-githubactions"
 )
 
-var downloadURLTemplate = "https://github.com/kubernetes-sigs/krew/releases/download/%s/krew-%s_%s.tar.gz"
+var (
+	downloadURLTemplate       = "https://github.com/kubernetes-sigs/krew/releases/download/%s/krew-%s_%s.tar.gz"
+	downloadSha256URLTemplate = "https://github.com/kubernetes-sigs/krew/releases/download/%s/krew-%s_%s.tar.gz.sha256"
+	version                   string
+)
 
 func main() {
-	version := os.Args[1]
+	flag.StringVar(&version, "version", "", "the version of the krew release")
+	flag.Parse()
 	var err error
 	if version == "latest" {
 		version, err = getTheLatestVersion()
 		if err != nil {
-			githubactions.Fatalf("could not found the latest release of kubernetes-sigs/krew: %v", err)
+			log.Fatalf("could not found the latest release of kubernetes-sigs/krew: %v", err)
 		}
 	}
-	// https://github.com/kubernetes-sigs/krew/releases/download/v0.4.2/krew-darwin_amd64.tar.gz
+
 	// https://github.com/kubernetes-sigs/krew/releases/download/v0.4.2/krew-darwin_amd64.tar.gz.sha256
 	releaseDownloadURL := fmt.Sprintf(downloadURLTemplate, version, runtime.GOOS, runtime.GOARCH)
 	td, err := ioutil.TempDir("", "setup-krew")
 	if err != nil {
-		githubactions.Fatalf("could not get working directory: %v", err)
+		log.Fatalf("could not get working directory: %v", err)
+	}
+	fileName := fmt.Sprintf("krew-%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH)
+	err = installAndExtractTheTarGZFiles(td, releaseDownloadURL, fileName, true)
+	if err != nil {
+		log.Fatalf("could not install %s from URL %s: %v", fileName, releaseDownloadURL, err)
 	}
 
-	u, err := url.Parse(releaseDownloadURL)
+	// https://github.com/kubernetes-sigs/krew/releases/download/v0.4.2/krew-darwin_amd64.tar.gz.sha256
+	sha256FileDownloadURL := fmt.Sprintf(downloadSha256URLTemplate, version, runtime.GOOS, runtime.GOARCH)
+	sha256fileName := fmt.Sprintf("krew-%s_%s.tar.gz.sha256", runtime.GOOS, runtime.GOARCH)
+	err = installAndExtractTheTarGZFiles(td, sha256FileDownloadURL, sha256fileName, true)
 	if err != nil {
-		githubactions.Fatalf("could not pare URL %s: %v", releaseDownloadURL, err)
+		log.Fatalf("could not install %s from URL %s: %v", sha256fileName, sha256FileDownloadURL, err)
 	}
 
-	fg := new(getter.HttpGetter)
-	binaryTarGzFile := filepath.Join(td, fmt.Sprintf("krew-%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH))
-	err = fg.GetFile(binaryTarGzFile, u)
-	if err != nil {
-		log.Fatalf("could not download file from URL %s: %v", releaseDownloadURL, err)
-	}
-	currentDirFiles, err := exec.Command("ls", "-latr", td).CombinedOutput()
-	if err != nil {
-		log.Fatalf("could not run ls in directory %s: %v", td, err)
-	}
-	fmt.Println(string(currentDirFiles))
-
-	tarDecompressor := new(getter.TarGzipDecompressor)
-	err = tarDecompressor.Decompress(td, binaryTarGzFile, true, 0600)
-	if err != nil {
-		log.Fatalf("could not run extract .tar.gz file %s: %v", binaryTarGzFile, err)
-	}
-
-	gw := os.Getenv("HOME")
-	fmt.Println(gw)
-	installationPath := fmt.Sprintf("%s/%s/%s", gw, ".setup-krew", "bin")
+	home := os.Getenv("HOME")
+	installationPath := fmt.Sprintf("%s/%s/%s", home, ".setup-krew", "bin")
 	_, err = exec.Command("mkdir", "-p", installationPath).CombinedOutput()
 	if err != nil {
 		log.Fatalf("could not create the home directory for krew: %v", err)
@@ -76,6 +71,39 @@ func main() {
 	if err != nil {
 		log.Fatalf("could not add binary to \"GITHUB_PATH\": %v", err)
 	}
+}
+
+func installAndExtractTheTarGZFiles(dst string, downloadURL string, fileName string, verbose bool) error {
+	u, err := url.Parse(downloadURL)
+	if err != nil {
+		return err
+	}
+
+	fg := new(getter.HttpGetter)
+	binaryTarGzFile := filepath.Join(dst, fileName)
+	err = fg.GetFile(binaryTarGzFile, u)
+	if err != nil {
+		return err
+	}
+
+	if strings.HasSuffix(fileName, ".tar.gz") {
+		log.Printf(".tar.gz file found: %s, extracting..\n", fileName)
+		tarDecompressor := new(getter.TarGzipDecompressor)
+		err = tarDecompressor.Decompress(dst, binaryTarGzFile, true, 0600)
+		if err != nil {
+			return err
+		}
+	}
+
+	if verbose {
+		log.Println("verbose mode enabled")
+		currentDirFiles, err := exec.Command("ls", "-latr", dst).CombinedOutput()
+		if err != nil {
+			return err
+		}
+		log.Println(string(currentDirFiles))
+	}
+	return nil
 }
 
 func getTheLatestVersion() (string, error) {
